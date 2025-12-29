@@ -3,15 +3,19 @@ import mysql from 'mysql2/promise';
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 
-// 初始化 Supabase 客户端（用于验证用户）
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/**
+ * 获取 Supabase 客户端（运行时初始化）
+ */
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Missing Supabase environment variables');
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Missing Supabase environment variables');
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey);
 }
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 /**
  * 创建 MySQL 连接池
@@ -116,6 +120,7 @@ export async function POST(request) {
       // 有 token 的情况：验证 token 并获取用户信息
       console.log('[create-user API] 使用 token 验证');
       const token = authHeader.substring(7);
+      const supabase = getSupabaseClient();
       const { data: { user }, error: authError } = await supabase.auth.getUser(token);
       
       if (authError || !user) {
@@ -146,6 +151,7 @@ export async function POST(request) {
       // 验证用户是否在 Supabase 中存在（使用 service role key）
       // 只有在验证成功的情况下才允许创建 MySQL 用户记录，提高安全性
       try {
+        const supabase = getSupabaseClient();
         const { data: { user }, error: authError } = await supabase.auth.admin.getUserById(requestSupabaseUserId);
         
         if (authError || !user) {

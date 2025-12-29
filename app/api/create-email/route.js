@@ -2,34 +2,49 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import XinnetMailAPI from '@/lib/xinnet-mail-api';
 
-// 初始化 Supabase 客户端（服务端）
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/**
+ * 获取 Supabase 客户端（运行时初始化）
+ */
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Missing Supabase environment variables');
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Missing Supabase environment variables');
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey);
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+/**
+ * 获取新网邮箱配置（运行时获取）
+ */
+function getXinnetConfig() {
+  const XINNET_CORPID = process.env.XINNET_CORPID;
+  const XINNET_CORPSECRET = process.env.XINNET_CORPSECRET;
+  const XINNET_DOMAIN = process.env.XINNET_DOMAIN || 'binfluencer.xyz';
+  const DEFAULT_PASSWORD = process.env.XINNET_DEFAULT_PASSWORD || 'Qwer1324..';
 
-// 新网邮箱 API 配置
-const XINNET_CORPID = process.env.XINNET_CORPID;
-const XINNET_CORPSECRET = process.env.XINNET_CORPSECRET;
-const XINNET_DOMAIN = process.env.XINNET_DOMAIN || 'binfluencer.xyz';
-const DEFAULT_PASSWORD = process.env.XINNET_DEFAULT_PASSWORD || 'Qwer1324..';
+  return {
+    XINNET_CORPID,
+    XINNET_CORPSECRET,
+    XINNET_DOMAIN,
+    DEFAULT_PASSWORD,
+  };
+}
 
 /**
  * 生成邮箱地址
  * 格式：红人名字@binfluencer.xyz
  */
-function generateEmailAddress(name) {
+function generateEmailAddress(name, domain) {
   // 移除空格，转换为小写，移除特殊字符
   const cleanName = name
     .toLowerCase()
     .replace(/\s+/g, '') // 移除所有空格
     .replace(/[^a-z0-9]/g, ''); // 只保留字母和数字
   
-  return `${cleanName}@${XINNET_DOMAIN}`;
+  return `${cleanName}@${domain}`;
 }
 
 /**
@@ -82,6 +97,8 @@ function splitChineseName(fullName) {
  * @returns {Promise<object>} 创建结果
  */
 async function createEmailWithProvider(email, userId, fullName) {
+  const { XINNET_CORPID, XINNET_CORPSECRET, XINNET_DOMAIN, DEFAULT_PASSWORD } = getXinnetConfig();
+
   // 检查配置
   if (!XINNET_CORPID || !XINNET_CORPSECRET) {
     throw new Error('新网邮箱 API 配置缺失，请检查环境变量 XINNET_CORPID 和 XINNET_CORPSECRET');
@@ -136,6 +153,10 @@ async function createEmailWithProvider(email, userId, fullName) {
 
 export async function POST(request) {
   try {
+    // 运行时获取配置和客户端
+    const supabase = getSupabaseClient();
+    const { XINNET_DOMAIN } = getXinnetConfig();
+
     const { name, userId } = await request.json();
 
     if (!name || !userId) {
@@ -146,7 +167,7 @@ export async function POST(request) {
     }
 
     // 生成邮箱地址
-    let emailAddress = generateEmailAddress(name);
+    let emailAddress = generateEmailAddress(name, XINNET_DOMAIN);
     let finalEmail = emailAddress;
     let attempts = 0;
     const maxAttempts = 10; // 最多尝试 10 次

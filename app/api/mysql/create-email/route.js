@@ -3,21 +3,36 @@ import mysql from 'mysql2/promise';
 import { createClient } from '@supabase/supabase-js';
 import XinnetMailAPI from '@/lib/xinnet-mail-api';
 
-// 初始化 Supabase 客户端
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/**
+ * 获取 Supabase 客户端（运行时初始化）
+ */
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Missing Supabase environment variables');
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Missing Supabase environment variables');
+  }
+
+  return createClient(supabaseUrl, supabaseServiceKey);
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+/**
+ * 获取新网邮箱配置（运行时获取）
+ */
+function getXinnetConfig() {
+  const XINNET_CORPID = process.env.XINNET_CORPID;
+  const XINNET_CORPSECRET = process.env.XINNET_CORPSECRET;
+  const XINNET_DOMAIN = process.env.XINNET_DOMAIN || 'binfluencer.xyz';
+  const DEFAULT_PASSWORD = process.env.XINNET_DEFAULT_PASSWORD || 'Qwer1324..';
 
-// 新网邮箱 API 配置
-const XINNET_CORPID = process.env.XINNET_CORPID;
-const XINNET_CORPSECRET = process.env.XINNET_CORPSECRET;
-const XINNET_DOMAIN = process.env.XINNET_DOMAIN || 'binfluencer.xyz';
-const DEFAULT_PASSWORD = process.env.XINNET_DEFAULT_PASSWORD || 'Qwer1324..';
+  return {
+    XINNET_CORPID,
+    XINNET_CORPSECRET,
+    XINNET_DOMAIN,
+    DEFAULT_PASSWORD,
+  };
+}
 
 /**
  * 创建 MySQL 连接池
@@ -45,6 +60,7 @@ function createMySQLConnection() {
  * 生成邮箱地址
  */
 function generateEmailAddress(name) {
+  const { XINNET_DOMAIN } = getXinnetConfig();
   const cleanName = name
     .toLowerCase()
     .replace(/\s+/g, '')
@@ -93,6 +109,8 @@ function splitChineseName(fullName) {
  * @returns {Promise<object>} 创建结果
  */
 async function createEmailWithProvider(email, fullName) {
+  const { XINNET_CORPID, XINNET_CORPSECRET, XINNET_DOMAIN, DEFAULT_PASSWORD } = getXinnetConfig();
+  
   // 检查配置
   if (!XINNET_CORPID || !XINNET_CORPSECRET) {
     throw new Error('新网邮箱 API 配置缺失，请检查环境变量 XINNET_CORPID 和 XINNET_CORPSECRET');
@@ -255,6 +273,7 @@ export async function POST(request) {
     const token = authHeader.substring(7);
     
     // 验证 Supabase token
+    const supabase = getSupabaseClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
       return NextResponse.json(
@@ -280,6 +299,7 @@ export async function POST(request) {
       .single();
 
     const fullName = profile?.full_name || name;
+    const { XINNET_DOMAIN } = getXinnetConfig();
 
     // 生成邮箱地址
     let emailAddress = generateEmailAddress(fullName);
