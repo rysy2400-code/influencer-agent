@@ -10,7 +10,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // 创建服务端 Supabase 客户端
 export async function createServerClient() {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   
   // 从 cookies 中获取 token
   const accessToken = cookieStore.get('sb-access-token')?.value
