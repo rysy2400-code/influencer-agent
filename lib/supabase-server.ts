@@ -9,26 +9,24 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // 创建服务端 Supabase 客户端
-export function createServerClient() {
+export async function createServerClient() {
   const cookieStore = cookies()
   
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      getSession: async () => {
-        // 从 cookies 中获取 session
-        const accessToken = cookieStore.get('sb-access-token')?.value
-        const refreshToken = cookieStore.get('sb-refresh-token')?.value
-        
-        if (!accessToken) {
-          return { data: { session: null }, error: null }
-        }
-        
-        // 使用 Supabase 客户端验证 session
-        const client = createClient(supabaseUrl, supabaseAnonKey)
-        const { data, error } = await client.auth.getSession()
-        return { data, error }
-      },
-    },
-  })
+  // 从 cookies 中获取 token
+  const accessToken = cookieStore.get('sb-access-token')?.value
+  const refreshToken = cookieStore.get('sb-refresh-token')?.value
+  
+  // 创建客户端
+  const client = createClient(supabaseUrl, supabaseAnonKey)
+  
+  // 如果有 token，设置 session
+  if (accessToken && refreshToken) {
+    await client.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    })
+  }
+  
+  return client
 }
 
