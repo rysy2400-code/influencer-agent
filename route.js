@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import mysql from 'mysql2/promise';
 import { createClient } from '@supabase/supabase-js';
 import XinnetMailAPI from '@/lib/xinnet-mail-api';
 
@@ -34,25 +35,42 @@ function getXinnetConfig() {
 }
 
 /**
- * 生成邮箱地址
- * 格式：红人名字@binfluencer.xyz
+ * 创建 MySQL 连接池
  */
-function generateEmailAddress(name, domain) {
-  // 移除空格，转换为小写，移除特殊字符
-  const cleanName = name
-    .toLowerCase()
-    .replace(/\s+/g, '') // 移除所有空格
-    .replace(/[^a-z0-9]/g, ''); // 只保留字母和数字
-  
-  return `${cleanName}@${domain}`;
+function createMySQLConnection() {
+  const config = {
+    host: process.env.MYSQL_HOST,
+    port: parseInt(process.env.MYSQL_PORT || '3306'),
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE || 'tiktok',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  };
+
+  if (!config.host || !config.user || !config.password) {
+    throw new Error('Missing MySQL environment variables');
+  }
+
+  return mysql.createPool(config);
 }
 
 /**
- * 将中文姓名拆分为 firstname 和 lastname
- * 简单策略：如果姓名长度 <= 2，第一个字符作为 lastname，其余作为 firstname
- * 如果姓名长度 > 2，前两个字符作为 lastname，其余作为 firstname
- * @param {string} fullName - 完整姓名
- * @returns {object} { firstname, lastname }
+ * 生成邮箱地址
+ */
+function generateEmailAddress(name) {
+  const { XINNET_DOMAIN } = getXinnetConfig();
+  const cleanName = name
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+  
+  return `${cleanName}@${XINNET_DOMAIN}`;
+}
+
+/**
+ * 拆分中文姓名
  */
 function splitChineseName(fullName) {
   if (!fullName || fullName.trim().length === 0) {
@@ -61,7 +79,6 @@ function splitChineseName(fullName) {
   
   const trimmed = fullName.trim();
   
-  // 如果包含空格，按空格拆分
   if (trimmed.includes(' ')) {
     const parts = trimmed.split(/\s+/);
     if (parts.length >= 2) {
@@ -72,16 +89,12 @@ function splitChineseName(fullName) {
     }
   }
   
-  // 中文姓名处理
   if (trimmed.length <= 2) {
-    // 2个字或更少：第一个字是姓，其余是名
     return {
       lastname: trimmed[0] || 'User',
       firstname: trimmed.substring(1) || 'User',
     };
   } else {
-    // 3个字或更多：前两个字是姓，其余是名（适用于复姓）
-    // 但更常见的做法是第一个字是姓，其余是名
     return {
       lastname: trimmed[0] || 'User',
       firstname: trimmed.substring(1) || 'User',
@@ -92,13 +105,12 @@ function splitChineseName(fullName) {
 /**
  * 调用新网企业邮箱 API 创建邮箱
  * @param {string} email - 邮箱地址
- * @param {string} userId - 用户 ID
  * @param {string} fullName - 用户全名
  * @returns {Promise<object>} 创建结果
  */
-async function createEmailWithProvider(email, userId, fullName) {
+async function createEmailWithProvider(email, fullName) {
   const { XINNET_CORPID, XINNET_CORPSECRET, XINNET_DOMAIN, DEFAULT_PASSWORD } = getXinnetConfig();
-
+  
   // 检查配置
   if (!XINNET_CORPID || !XINNET_CORPSECRET) {
     throw new Error('新网邮箱 API 配置缺失，请检查环境变量 XINNET_CORPID 和 XINNET_CORPSECRET');
@@ -151,23 +163,150 @@ async function createEmailWithProvider(email, userId, fullName) {
   }
 }
 
+/**
+ * 在 MySQL 中创建邮箱记录
+ * @param supabase Supabase 客户端（用于读取 profiles）
+ * @param supabaseUserId Supabase 用户 ID
+ * @param email 创建的邮箱地址
+ * @param fullName 用户全名
+ */
+async function createEmailInMySQL(supabase, supabaseUserId, email, fullName) {
+  const pool = createMySQLConnection();
+  
+  try {
+    // 检查是否已存在
+    const [existing] = await pool.execute(
+      'SELECT * FROM t_red_user_email WHERE supabase_user_id = ?',
+      [supabaseUserId]
+    );
+
+    if (existing.length > 0) {
+      return {
+        success: true,
+        email: existing[0].email || email,
+        message: '邮箱记录已存在',
+      };
+    }
+
+    // 获取用户的 user_id（从 t_red_user 表）
+    let [userRows] = await pool.execute(
+      'SELECT user_id FROM t_red_user WHERE supabase_user_id = ?',
+      [supabaseUserId]
+    );
+
+    // 如果用户不存在，自动创建用户记录
+    if (userRows.length === 0) {
+      // 获取用户信息
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', supabaseUserId)
+        .single();
+
+      const userEmail = profile?.email || '';
+      const userName = profile?.full_name || userEmail.split('@')[0] || 'User';
+
+      // 获取下一个 red_id
+      const [maxRedId] = await pool.execute(
+        'SELECT COALESCE(MAX(red_id), 0) + 1 as next_red_id FROM t_red_user'
+      );
+      const nextRedId = maxRedId[0]?.next_red_id || 1;
+
+      // 创建用户记录（注意：t_red_user 表没有 created_at 和 updated_at 字段）
+      const [insertResult] = await pool.execute(
+        `INSERT INTO t_red_user (
+          supabase_user_id,
+          red_id,
+          login_email,
+          shipping_full_name
+        ) VALUES (?, ?, ?, ?)`,
+        [supabaseUserId, nextRedId, userEmail, userName]
+      );
+
+      // 重新查询获取 user_id
+      [userRows] = await pool.execute(
+        'SELECT user_id FROM t_red_user WHERE supabase_user_id = ?',
+        [supabaseUserId]
+      );
+    }
+
+    const userId = userRows[0].user_id;
+
+    // 获取下一个 id（如果表中有数据）
+    const [maxId] = await pool.execute(
+      'SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM t_red_user_email'
+    );
+    const nextId = maxId[0]?.next_id || 1;
+
+    // 插入邮箱记录（包含所有必填字段）
+    await pool.execute(
+      `INSERT INTO t_red_user_email (
+        id,
+        user_id,
+        supabase_user_id,
+        email,
+        email_type,
+        status,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [nextId, userId, supabaseUserId, email, 1, 1]
+    );
+
+    return {
+      success: true,
+      email: email,
+      message: '邮箱记录创建成功',
+    };
+  } finally {
+    await pool.end();
+  }
+}
+
 export async function POST(request) {
   try {
-    // 运行时获取配置和客户端
-    const supabase = getSupabaseClient();
-    const { XINNET_DOMAIN } = getXinnetConfig();
-
-    const { name, userId } = await request.json();
-
-    if (!name || !userId) {
+    // 从请求头获取用户认证信息
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: '缺少必要参数：name 和 userId' },
+        { error: '未授权访问' },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.substring(7);
+    
+    // 验证 Supabase token
+    const supabase = getSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '无效的认证令牌' },
+        { status: 401 }
+      );
+    }
+
+    const { name } = await request.json();
+
+    if (!name) {
+      return NextResponse.json(
+        { error: '缺少必要参数：name' },
         { status: 400 }
       );
     }
 
+    // 获取用户信息
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .single();
+
+    const fullName = profile?.full_name || name;
+    const { XINNET_DOMAIN } = getXinnetConfig();
+
     // 生成邮箱地址
-    let emailAddress = generateEmailAddress(name, XINNET_DOMAIN);
+    let emailAddress = generateEmailAddress(fullName);
     let finalEmail = emailAddress;
     let attempts = 0;
     const maxAttempts = 10; // 最多尝试 10 次
@@ -175,7 +314,7 @@ export async function POST(request) {
     // 尝试创建邮箱，如果已存在则添加数字后缀重试
     while (attempts < maxAttempts) {
       try {
-        // 先检查数据库中是否已存在
+        // 先检查 Supabase profiles 表中是否已存在（与 /api/create-email 保持一致）
         const { data: existingProfile } = await supabase
           .from('profiles')
           .select('business_email')
@@ -191,14 +330,31 @@ export async function POST(request) {
           continue;
         }
 
+        // 检查 MySQL 中是否已存在（额外检查）
+        const pool = createMySQLConnection();
+        const [existing] = await pool.execute(
+          'SELECT * FROM t_red_user_email WHERE email = ?',
+          [emailAddress]
+        );
+        await pool.end();
+
+        if (existing.length > 0) {
+          // MySQL 中已存在，生成新的邮箱地址
+          const baseName = emailAddress.split('@')[0];
+          const counter = attempts + 1;
+          emailAddress = `${baseName}${counter}@${XINNET_DOMAIN}`;
+          attempts++;
+          continue;
+        }
+
         // 尝试通过 API 创建邮箱
-        await createEmailWithProvider(emailAddress, userId, name);
+        await createEmailWithProvider(emailAddress, fullName);
         
         // 创建成功
         finalEmail = emailAddress;
         break;
       } catch (error) {
-        // 如果是邮箱已存在的错误，尝试下一个
+        // 如果是邮箱已存在的错误，尝试下一个（与 /api/create-email 保持一致）
         if (error.message.includes('已被使用') || error.message.includes('40006902')) {
           const baseName = emailAddress.split('@')[0];
           const counter = attempts + 1;
@@ -216,14 +372,17 @@ export async function POST(request) {
       throw new Error('尝试创建邮箱失败次数过多，请稍后重试或联系管理员');
     }
 
-    // 更新数据库中的邮箱地址和创建时间
+    // 在 MySQL 中创建邮箱记录
+    await createEmailInMySQL(supabase, user.id, finalEmail, fullName);
+
+    // 更新 Supabase profiles 表中的邮箱地址和创建时间（与 /api/create-email 保持一致）
     const { error: updateError } = await supabase
       .from('profiles')
       .update({
         business_email: finalEmail,
         business_email_created_at: new Date().toISOString(),
       })
-      .eq('id', userId);
+      .eq('id', user.id);
 
     if (updateError) {
       console.error('更新数据库失败:', updateError);
@@ -243,3 +402,98 @@ export async function POST(request) {
   }
 }
 
+
+    if (updateError) {
+      console.error('更新数据库失败:', updateError);
+      // 即使数据库更新失败，邮箱已创建成功，所以继续返回成功
+    }
+
+    return NextResponse.json({
+      email: finalEmail,
+      message: '邮箱创建成功',
+    });
+  } catch (error) {
+    console.error('创建邮箱失败:', error);
+    return NextResponse.json(
+      { error: error.message || '创建邮箱失败，请稍后重试' },
+      { status: 500 }
+    );
+  }
+}
+
+
+    if (updateError) {
+      console.error('更新数据库失败:', updateError);
+      // 即使数据库更新失败，邮箱已创建成功，所以继续返回成功
+    }
+
+    return NextResponse.json({
+      email: finalEmail,
+      message: '邮箱创建成功',
+    });
+  } catch (error) {
+    console.error('创建邮箱失败:', error);
+    return NextResponse.json(
+      { error: error.message || '创建邮箱失败，请稍后重试' },
+      { status: 500 }
+    );
+  }
+}
+
+
+    if (updateError) {
+      console.error('更新数据库失败:', updateError);
+      // 即使数据库更新失败，邮箱已创建成功，所以继续返回成功
+    }
+
+    return NextResponse.json({
+      email: finalEmail,
+      message: '邮箱创建成功',
+    });
+  } catch (error) {
+    console.error('创建邮箱失败:', error);
+    return NextResponse.json(
+      { error: error.message || '创建邮箱失败，请稍后重试' },
+      { status: 500 }
+    );
+  }
+}
+
+
+
+    if (updateError) {
+      console.error('更新数据库失败:', updateError);
+      // 即使数据库更新失败，邮箱已创建成功，所以继续返回成功
+    }
+
+    return NextResponse.json({
+      email: finalEmail,
+      message: '邮箱创建成功',
+    });
+  } catch (error) {
+    console.error('创建邮箱失败:', error);
+    return NextResponse.json(
+      { error: error.message || '创建邮箱失败，请稍后重试' },
+      { status: 500 }
+    );
+  }
+}
+
+
+    if (updateError) {
+      console.error('更新数据库失败:', updateError);
+      // 即使数据库更新失败，邮箱已创建成功，所以继续返回成功
+    }
+
+    return NextResponse.json({
+      email: finalEmail,
+      message: '邮箱创建成功',
+    });
+  } catch (error) {
+    console.error('创建邮箱失败:', error);
+    return NextResponse.json(
+      { error: error.message || '创建邮箱失败，请稍后重试' },
+      { status: 500 }
+    );
+  }
+}
