@@ -62,7 +62,38 @@ export default function SetupEmailPage() {
     });
   }, [router]);
 
-  const handleCreateEmail = async () => {
+  // 刷新 token 并获取最新的 session
+  const refreshSession = async (currentSession = null) => {
+    try {
+      const sessionToRefresh = currentSession || session;
+      
+      if (!sessionToRefresh || !sessionToRefresh.refresh_token) {
+        console.error('无法刷新 session: 缺少 refresh_token');
+        return null;
+      }
+
+      const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession({
+        refresh_token: sessionToRefresh.refresh_token
+      });
+      
+      if (refreshError) {
+        console.error('刷新 session 失败:', refreshError);
+        return null;
+      }
+      
+      if (refreshedSession) {
+        setSession(refreshedSession);
+        return refreshedSession;
+      }
+      
+      return null;
+    } catch (err) {
+      console.error('刷新 session 异常:', err);
+      return null;
+    }
+  };
+
+  const handleCreateEmail = async (retryCount = 0) => {
     if (!profile?.full_name) {
       setError('Please complete your name information first');
       return;
@@ -72,11 +103,20 @@ export default function SetupEmailPage() {
     setError(null);
 
     try {
+      // 获取最新的 session（确保使用最新的 token）
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (!currentSession) {
+        setError('请重新登录');
+        router.push('/login');
+        return;
+      }
+
       // 调用 MySQL API 创建邮箱（同时创建邮箱和记录到 MySQL）
       const response = await fetch('/api/mysql/create-email', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${currentSession.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -85,6 +125,18 @@ export default function SetupEmailPage() {
       });
 
       const data = await response.json();
+
+      // 如果是 401 错误且是第一次尝试，刷新 token 并重试
+      if (response.status === 401 && retryCount === 0) {
+        const refreshedSession = await refreshSession(currentSession);
+        if (refreshedSession) {
+          // 使用新的 session 重试
+          setCreatingEmail(false);
+          return handleCreateEmail(1);
+        } else {
+          throw new Error('Token 已过期，请重新登录');
+        }
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to create email');
@@ -97,7 +149,7 @@ export default function SetupEmailPage() {
           business_email: data.email,
           business_email_created_at: new Date().toISOString(),
         })
-        .eq('id', session.user.id);
+        .eq('id', currentSession.user.id);
 
       if (updateError) {
         console.warn('更新 Supabase profiles 失败:', updateError);
@@ -124,6 +176,15 @@ export default function SetupEmailPage() {
     setVerificationResult(null);
 
     try {
+      // 获取最新的 session
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (!currentSession) {
+        setError('请重新登录');
+        router.push('/login');
+        return;
+      }
+
       const response = await fetch('/api/verify-tiktok-bio', {
         method: 'POST',
         headers: {
@@ -132,7 +193,7 @@ export default function SetupEmailPage() {
         body: JSON.stringify({
           tiktokUrl: tiktokUrl,
           email: email,
-          userId: session.user.id,
+          userId: currentSession.user.id,
         }),
       });
 
@@ -161,13 +222,22 @@ export default function SetupEmailPage() {
     setError(null);
 
     try {
+      // 获取最新的 session
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (!currentSession) {
+        setError('请重新登录');
+        router.push('/login');
+        return;
+      }
+
       // 更新用户资料，标记邮箱设置已完成
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
           email_setup_completed: true,
         })
-        .eq('id', session.user.id);
+        .eq('id', currentSession.user.id);
 
       if (updateError) {
         throw new Error('Failed to update status: ' + updateError.message);
