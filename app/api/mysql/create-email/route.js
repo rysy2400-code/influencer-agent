@@ -63,6 +63,11 @@ function generateEmailAddress(name) {
   return `${base}@${XINNET_DOMAIN}`;
 }
 
+// 生成随机3位数字（100-999）
+function generateRandom3Digits() {
+  return Math.floor(Math.random() * 900) + 100; // 100-999
+}
+
 // 拆分中文姓名
 function splitChineseName(fullName) {
   if (!fullName || fullName.trim().length === 0) {
@@ -281,6 +286,8 @@ export async function POST(request) {
     let finalEmail = emailAddress;
     let attempts = 0;
     const maxAttempts = 10;
+    const baseName = emailAddress.split('@')[0]; // 基础用户名（不含域名）
+    const triedNumbers = new Set(); // 记录已尝试的随机数字
 
     while (attempts < maxAttempts) {
       try {
@@ -295,9 +302,13 @@ export async function POST(request) {
 
         if (existingProfile) {
           console.log(`[创建邮箱] Supabase 中已存在: ${emailAddress}`);
-          const baseName = emailAddress.split('@')[0];
-          const counter = attempts + 1;
-          emailAddress = `${baseName}${counter}@${XINNET_DOMAIN}`;
+          // 生成新的随机3位数字
+          let randomNum;
+          do {
+            randomNum = generateRandom3Digits();
+          } while (triedNumbers.has(randomNum) && triedNumbers.size < 900);
+          triedNumbers.add(randomNum);
+          emailAddress = `${baseName}${randomNum}@${XINNET_DOMAIN}`;
           attempts++;
           continue;
         }
@@ -312,9 +323,13 @@ export async function POST(request) {
 
         if (existing.length > 0) {
           console.log(`[创建邮箱] MySQL 中已存在: ${emailAddress}`);
-          const baseName = emailAddress.split('@')[0];
-          const counter = attempts + 1;
-          emailAddress = `${baseName}${counter}@${XINNET_DOMAIN}`;
+          // 生成新的随机3位数字
+          let randomNum;
+          do {
+            randomNum = generateRandom3Digits();
+          } while (triedNumbers.has(randomNum) && triedNumbers.size < 900);
+          triedNumbers.add(randomNum);
+          emailAddress = `${baseName}${randomNum}@${XINNET_DOMAIN}`;
           attempts++;
           continue;
         }
@@ -333,9 +348,13 @@ export async function POST(request) {
         // 如果是邮箱已存在的错误，尝试下一个
         if (msg.includes('已被使用') || msg.includes('40006902')) {
           console.log(`[创建邮箱] 邮箱已被使用，尝试下一个: ${emailAddress}`);
-          const baseName = emailAddress.split('@')[0];
-          const counter = attempts + 1;
-          emailAddress = `${baseName}${counter}@${XINNET_DOMAIN}`;
+          // 生成新的随机3位数字
+          let randomNum;
+          do {
+            randomNum = generateRandom3Digits();
+          } while (triedNumbers.has(randomNum) && triedNumbers.size < 900);
+          triedNumbers.add(randomNum);
+          emailAddress = `${baseName}${randomNum}@${XINNET_DOMAIN}`;
           attempts++;
           continue;
         }
