@@ -211,6 +211,9 @@ export async function POST(request) {
       );
     }
 
+    // 获取 Supabase 客户端
+    const supabase = getSupabaseClient();
+
     // 提取 TikTok 用户名
     const username = extractTikTokUsername(tiktokUrl);
     if (!username) {
@@ -319,4 +322,3 @@ export async function POST(request) {
     );
   }
 }
-
