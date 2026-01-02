@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+
 export default function SetupEmailPage() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -16,6 +17,8 @@ export default function SetupEmailPage() {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState(null);
   const [step, setStep] = useState(1); // 1: 生成邮箱, 2: 输入TikTok链接并验证, 3: 完成
+  const [copied, setCopied] = useState(false);
+  const [imageError, setImageError] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -107,7 +110,7 @@ export default function SetupEmailPage() {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       
       if (!currentSession) {
-        setError('请重新登录');
+        setError('Please log in again');
         router.push('/login');
         return;
       }
@@ -134,7 +137,7 @@ export default function SetupEmailPage() {
           setCreatingEmail(false);
           return handleCreateEmail(1);
         } else {
-          throw new Error('Token 已过期，请重新登录');
+          throw new Error('Token expired, please log in again');
         }
       }
 
@@ -180,7 +183,7 @@ export default function SetupEmailPage() {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       
       if (!currentSession) {
-        setError('请重新登录');
+        setError('Please log in again');
         router.push('/login');
         return;
       }
@@ -217,6 +220,31 @@ export default function SetupEmailPage() {
     }
   };
 
+  const handleCopyEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // 2秒后恢复
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      // 降级方案：使用传统方法
+      const textArea = document.createElement('textarea');
+      textArea.value = email;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (fallbackErr) {
+        console.error('Fallback copy failed:', fallbackErr);
+      }
+      document.body.removeChild(textArea);
+    }
+  };
+
   const handleConfirm = async () => {
     setConfirming(true);
     setError(null);
@@ -226,7 +254,7 @@ export default function SetupEmailPage() {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       
       if (!currentSession) {
-        setError('请重新登录');
+        setError('Please log in again');
         router.push('/login');
         return;
       }
@@ -358,8 +386,29 @@ export default function SetupEmailPage() {
                     <p className="text-sm text-green-800 mb-3">
                       Your business email:
                     </p>
-                    <div className="bg-white px-4 py-2 rounded border border-green-300">
-                      <p className="font-mono text-base font-semibold text-green-900">{email}</p>
+                    <div className="bg-white px-4 py-2 rounded border border-green-300 flex items-center justify-between gap-2">
+                      <p className="font-mono text-base font-semibold text-green-900 flex-1 break-all">{email}</p>
+                      <button
+                        onClick={handleCopyEmail}
+                        className="flex-shrink-0 px-3 py-1.5 text-sm font-medium text-green-600 bg-green-50 hover:bg-green-100 border border-green-200 rounded-md transition-colors duration-200 flex items-center gap-1.5"
+                        title="Copy email to clipboard"
+                      >
+                        {copied ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -371,6 +420,36 @@ export default function SetupEmailPage() {
                   Please add your business email to your TikTok account Bio, then enter your TikTok link to verify.
                 </p>
                 
+                {/* 示例图片区域 */}
+                <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                  <p className="text-sm font-medium text-gray-700 mb-3">Example: Where to add your email</p>
+                  <div className="relative max-w-md mx-auto">
+                    <div className="relative rounded-md shadow-sm overflow-hidden bg-white">
+                      {!imageError ? (
+                        <img 
+                          src="/images/tiktok-bio-example.png" 
+                          alt="TikTok profile example showing where to add email"
+                          className="w-full h-auto"
+                          onError={() => setImageError(true)}
+                        />
+                      ) : (
+                        <div className="p-8 text-center bg-gray-100 min-h-[200px] flex flex-col items-center justify-center">
+                          <svg className="w-16 h-16 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          <p className="text-sm text-gray-500">Example image will appear here</p>
+                          <p className="text-xs text-gray-400 mt-1">Place image at: public/images/tiktok-bio-example.png</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 text-center">
+                    <p className="text-xs text-gray-600">
+                      💡 Add: <span className="font-mono font-semibold text-gray-800">{email}</span> to your TikTok Bio
+                    </p>
+                  </div>
+                </div>
+                
                 <div className="space-y-4">
                   <div>
                     <label htmlFor="tiktok-url" className="block text-sm font-medium text-blue-900 mb-2">
@@ -381,7 +460,7 @@ export default function SetupEmailPage() {
                       type="text"
                       value={tiktokUrl}
                       onChange={(e) => setTiktokUrl(e.target.value)}
-                      placeholder="https://www.tiktok.com/@username 或 @username"
+                      placeholder="https://www.tiktok.com/@username or @username"
                       className="w-full px-4 py-3 text-base border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/90"
                     />
                     <p className="mt-2 text-xs text-blue-700">
@@ -447,6 +526,7 @@ export default function SetupEmailPage() {
                               <li>Email <span className="font-mono font-semibold">{email}</span> has been added to TikTok Bio</li>
                               <li>TikTok account is public (not private)</li>
                               <li>Link format is correct</li>
+                              <li>Wait a few minutes before retrying (TikTok may need time to update)</li>
                             </ul>
                           </div>
                         </div>
@@ -455,18 +535,6 @@ export default function SetupEmailPage() {
                   </div>
                 </div>
               )}
-
-              {/* 提示信息 */}
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-800">
-                  <strong>Tip:</strong> If verification fails, please ensure:
-                </p>
-                <ul className="mt-2 text-xs text-yellow-700 space-y-1 list-disc list-inside">
-                  <li>Email <span className="font-mono font-semibold">{email}</span> has been added to TikTok Bio</li>
-                  <li>TikTok account is set to public (not private)</li>
-                  <li>Wait a few minutes before retrying (TikTok may need time to update)</li>
-                </ul>
-              </div>
             </div>
           )}
 

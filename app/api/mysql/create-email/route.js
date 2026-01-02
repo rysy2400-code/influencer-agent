@@ -105,7 +105,7 @@ async function createEmailWithProvider(email, fullName) {
     getXinnetConfig();
 
   if (!XINNET_CORPID || !XINNET_CORPSECRET) {
-    throw new Error('新网邮箱 API 配置缺失，请检查环境变量 XINNET_CORPID 和 XINNET_CORPSECRET');
+    throw new Error('Xinnet Mail API configuration missing. Please check environment variables XINNET_CORPID and XINNET_CORPSECRET');
   }
 
   const apiClient = new XinnetMailAPI(XINNET_CORPID, XINNET_CORPSECRET, XINNET_DOMAIN);
@@ -131,21 +131,21 @@ async function createEmailWithProvider(email, fullName) {
       return {
         success: true,
         email,
-        message: '邮箱创建成功',
+        message: 'Email created successfully',
       };
     }
 
-    throw new Error('创建邮箱失败：API 返回失败');
+    throw new Error('Failed to create email: API returned failure');
   } catch (error) {
     const msg = String(error?.message || '');
     if (msg.includes('40006902')) {
-      throw new Error('该邮箱地址已被使用，请尝试其他名称');
+      throw new Error('This email address is already in use. Please try a different name');
     }
     if (msg.includes('20002005')) {
-      throw new Error('邮箱地址格式不正确');
+      throw new Error('Invalid email address format');
     }
     if (msg.includes('20002004')) {
-      throw new Error('密码加密失败，请联系管理员');
+      throw new Error('Password encryption failed. Please contact administrator');
     }
     throw error;
   }
@@ -246,7 +246,7 @@ export async function POST(request) {
     // 认证头
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: '未授权访问' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized access' }, { status: 401 });
     }
 
     const token = authHeader.substring(7);
@@ -259,14 +259,14 @@ export async function POST(request) {
     } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
-      return NextResponse.json({ error: '无效的认证令牌' }, { status: 401 });
+      return NextResponse.json({ error: 'Invalid authentication token' }, { status: 401 });
     }
 
     const { name } = await request.json();
 
     if (!name) {
       return NextResponse.json(
-        { error: '缺少必要参数：name' },
+        { error: 'Missing required parameter: name' },
         { status: 400 }
       );
     }
@@ -372,7 +372,7 @@ export async function POST(request) {
     }
 
     if (attempts >= maxAttempts) {
-      throw new Error('尝试创建邮箱失败次数过多，请稍后重试或联系管理员');
+      throw new Error('Too many failed attempts to create email. Please try again later or contact administrator');
     }
 
     // 写入 MySQL 记录（方案A：传入 supabase）
@@ -399,7 +399,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('创建邮箱失败:', error);
     return NextResponse.json(
-      { error: error.message || '创建邮箱失败，请稍后重试' },
+      { error: error.message || 'Failed to create email, please try again later' },
       { status: 500 }
     );
   }

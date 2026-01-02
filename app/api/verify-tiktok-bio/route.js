@@ -206,7 +206,7 @@ export async function POST(request) {
 
     if (!tiktokUrl || !email || !userId) {
       return NextResponse.json(
-        { error: '缺少必要参数：tiktokUrl、email 和 userId' },
+        { error: 'Missing required parameters: tiktokUrl, email, and userId' },
         { status: 400 }
       );
     }
@@ -218,7 +218,7 @@ export async function POST(request) {
     const username = extractTikTokUsername(tiktokUrl);
     if (!username) {
       return NextResponse.json(
-        { error: '无效的 TikTok 链接格式。请使用格式：https://www.tiktok.com/@username 或 @username' },
+        { error: 'Invalid TikTok link format. Please use format: https://www.tiktok.com/@username or @username' },
         { status: 400 }
       );
     }
@@ -229,7 +229,7 @@ export async function POST(request) {
     if (!bio) {
       return NextResponse.json(
         { 
-          error: '无法获取 TikTok Bio 信息。请确保：\n1. TikTok 账号是公开的\n2. 链接格式正确\n3. 稍后重试',
+          error: 'Unable to fetch TikTok Bio information.',
           verified: false,
         },
         { status: 200 }
@@ -305,17 +305,17 @@ export async function POST(request) {
 
     return NextResponse.json({
       verified: isVerified,
-      bio: bio.substring(0, 200), // 返回部分 Bio 内容用于显示
+      bio: bio.substring(0, 200), // 返回部分 Bio 内容用于 display
       username: username,
       message: isVerified 
-        ? '验证成功！您的邮箱已正确添加到 TikTok Bio 中。' 
-        : '验证失败。未在 TikTok Bio 中找到您的邮箱地址，请确认已添加后再试。',
+        ? 'Verification successful! Your email has been correctly added to your TikTok Bio.' 
+        : 'Your email address was not found in your TikTok Bio.',
     });
   } catch (error) {
     console.error('验证 TikTok Bio 失败:', error);
     return NextResponse.json(
       { 
-        error: error.message || '验证失败，请稍后重试',
+        error: error.message || 'Verification failed.',
         verified: false,
       },
       { status: 500 }

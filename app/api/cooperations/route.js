@@ -39,6 +39,88 @@ function createMySQLConnection() {
 }
 
 /**
+ * 带重试机制的 Supabase 用户验证
+ * 处理网络连接错误（ECONNRESET, ETIMEDOUT 等）
+ */
+async function getUserWithRetry(supabase, token, maxRetries = 3) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      
+      // 如果成功，返回结果
+      if (user && !authError) {
+        return { user, error: null };
+      }
+      
+      // 如果有错误，检查错误类型
+      if (authError) {
+        // 如果是网络错误，继续重试
+        if (isNetworkError(authError)) {
+          lastError = authError;
+          if (attempt < maxRetries) {
+            const delay = attempt * 500; // 递增延迟：500ms, 1000ms, 1500ms
+            console.warn(`[cooperations API] 网络错误，${delay}ms 后重试 (${attempt}/${maxRetries}):`, authError.message);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        } else {
+          // 如果是认证错误（不是网络错误），直接返回
+          return { user: null, error: authError };
+        }
+      }
+      
+      // 如果没有用户也没有错误，返回空结果
+      return { user: null, error: authError || new Error('Unknown error') };
+    } catch (error) {
+      // 捕获网络异常（fetch failed 等）
+      if (isNetworkError(error)) {
+        lastError = error;
+        if (attempt < maxRetries) {
+          const delay = attempt * 500;
+          console.warn(`[cooperations API] 网络异常，${delay}ms 后重试 (${attempt}/${maxRetries}):`, error.message);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      } else {
+        // 非网络错误，直接抛出
+        throw error;
+      }
+    }
+  }
+  
+  // 所有重试都失败
+  return { user: null, error: lastError || new Error('Network request failed after retries') };
+}
+
+/**
+ * 判断是否是网络错误
+ */
+function isNetworkError(error) {
+  if (!error) return false;
+  
+  const errorMessage = error.message?.toLowerCase() || '';
+  const errorCode = error.code || error.cause?.code || '';
+  
+  const networkErrorIndicators = [
+    'fetch failed',
+    'econnreset',
+    'etimedout',
+    'enotfound',
+    'econnrefused',
+    'network',
+    'socket',
+    'tls',
+    'connection',
+  ];
+  
+  return networkErrorIndicators.some(indicator => 
+    errorMessage.includes(indicator) || errorCode.toLowerCase().includes(indicator)
+  );
+}
+
+/**
  * 根据状态分类合作记录
  * 
  * 分类规则：
@@ -102,16 +184,34 @@ export async function GET(request) {
 
     const token = authHeader.substring(7);
     
-    // 验证 Supabase token
+    // 验证 Supabase token（带重试机制）
     const supabase = getSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const { user, error: authError } = await getUserWithRetry(supabase, token);
+    
     if (authError || !user) {
+      const isNetworkErr = isNetworkError(authError);
+      
       console.error('[cooperations API] Token 验证失败:', {
         error: authError?.message || 'Unknown error',
-        errorCode: authError?.status || 'N/A',
+        errorCode: authError?.code || authError?.status || 'N/A',
         tokenLength: token.length,
-        usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+        usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        isNetworkError: isNetworkErr
       });
+      
+      // 如果是网络错误，返回 503（服务暂时不可用）
+      if (isNetworkErr) {
+        return NextResponse.json(
+          { 
+            error: '网络连接失败，请稍后重试',
+            details: '无法连接到认证服务，可能是网络问题或服务暂时不可用',
+            retry: true
+          },
+          { status: 503 }
+        );
+      }
+      
+      // 其他错误返回 401（未授权）
       return NextResponse.json(
         { error: '无效的认证令牌', details: authError?.message || 'Token validation failed' },
         { status: 401 }
@@ -186,4 +286,3 @@ export async function GET(request) {
     }
   }
 }
-

@@ -948,7 +948,7 @@ export default function DashboardPage() {
         <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
-              <h1 className="text-sm sm:text-lg md:text-xl font-semibold text-gray-900 whitespace-nowrap truncate">Influencer Dashboard</h1>
+              <h1 className="text-sm sm:text-lg md:text-xl font-semibold text-gray-900 whitespace-nowrap truncate">Dashboard</h1>
             </div>
             <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
               <span className="text-xs sm:text-sm text-gray-700 whitespace-nowrap">
@@ -1277,7 +1277,7 @@ export default function DashboardPage() {
                     <div className="text-4xl mb-4">📭</div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No Records</h3>
                     <p className="text-sm text-gray-600">
-                      No collaboration records in this section
+                      Your AI talent manager Bin is finding suitable collaborations for you
                     </p>
                   </div>
                 ) : (
